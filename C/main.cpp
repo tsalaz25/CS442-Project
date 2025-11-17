@@ -221,13 +221,90 @@ void rma_blocked (int n, double* A, double* B, double* C, int n_iter) {
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 	if (n % size != 0){
-		if (rank == 0){
+		if (rank =:wq
+						= 0){
 			std::fprintf(stderr, "Blocked Mat not Divisible n=%d by P=%d", n, size);
 		}
 		MPI_Abort(MPI_COMM_WORLD, 1);
 	}
 
-	
+	const int BK = n/size;
+
+	std::vector<double> A_local (BK * n);
+	std::vector<double> B_full (n * n);
+	std::vector<double> C_local (BK * n);
+
+	//Window for A and B, Roots exposed, others with size 0
+	MPI_Win winA, winB;
+	if (rank == 0){
+		MPI_Win_create(A, n * n * sizeof(double), sizeof(double),
+					   MPI_INFO_NULL, MPI_COMM_WORLD, &winA);
+		MPI_Win_create(B, n * n * sizeof(double), sizeof(double),
+					   MPI_INFO_NULL, MPI_COMM_WORLD, &winB);
+	} else {
+		MPI_Win_create(nullptr, 0, sizeof(double),
+						MPI_INFO_NULL, MPI_COMM_WORLD, &winA);
+		MPI_Win_create(nullptr, 0, sizeof(double),
+						MPI_INFO_NULL, MPI_COMM_WORLD, &winB);
+	}
+
+	//Each Rank Pulls Rows of A and B from rank 0
+	MPI_Win_lock(MPI_LOCK_SHARED, 0, 0, winA);
+	MPI_Get(A_local.data(), BK * n, MPI_DOUBLE, 0, 
+			rank * BK * n, BK * n, MPI_DOUBLE, winA);
+	MPI_Win_unlock(0, winA);
+
+	MPI_Win_lock(MPI_SHARED, 0, 0, winB);
+	MPI_Get(B_full.data(), n * n, MPI_DOUBLE, 0,
+			0, n * n, MPI_DOUBLE, winB);
+	MPI_Win_unlock(0, winB);
+
+	//Every Rank now has A(BK * n) and B(n*n)
+	for (int iter = 0; iter < n_iter; iter++){
+		std::fill (C_local.begin(), C_local.end(), 0.0);
+
+		//Same Blocked structure from before
+		for (int ii = 0; ii < BK; ii++){
+			int i_end = (ii + BK < BK) ? (ii + BK) : BK;
+
+			for (int kk = 0; kk < n; kk += BK){
+				int k_end = (kk + BK < n) ? (kk + BK) ? n;
+
+				for (int jj = 0; jj < n; jj += BK){
+					int j_end = (jj + BK < n) ? (jj + BK) : n;
+					
+					for (int i = ii; i < i_end; i++){
+						double *c_row = &C_local[i*n];
+
+						for (int k = kk; k < k_end; k++){
+							double aik = A_local[i * n + k];
+							const double *b_row = &B_full[k * n];
+
+							for (int j = jj; j < j_end; j++){
+								c_row[j] += aik * b_row[j];
+							}
+
+						}
+					}
+				}
+			}
+		}
+	}
+
+	MPI_Win_free(&winA);
+	MPI_Win_free(&winB);
+
+	//Gather Local C to Rank 0
+	if (rank == 0){
+		std::copy(C_local.begin(), C_local.end(), C);
+		for (int p = 1; p < size; p++){
+			int r0 = p * BK;
+			MPI_Recv(C + r0 * n, BK * n, MPI_DOUBLE, p , 2,
+					 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+	} else {
+		MPI_Send(C_loacl.data(), BK * n, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+	}
 
 
 }
@@ -237,8 +314,67 @@ void rma_fox (double* A, double* B, double* C, int n, int sq_num_procs, int rank
 }
 
 void rma_cannon(double* A, double* B, double* C,int n, int sq_num_procs, int rank_row, int rank_col){
-	return -1;
+	int rank, num_procs;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+
+	int q = sq_num_procs;
+	int size = n * n; //Elems per block
+
+	for (int i -0; i < size; i++){
+		C[i] = 0.0;
+	}
+
+	//Expose A and B Blocks in Windows
+	MPI_Win winA, winB;
+	MPI_Win_create(A, size * sizeof(double), sizeof(double),
+                   MPI_INFO_NULL, MPI_COMM_WORLD, &winA);
+	MPI_Win_create(B, size * sizeof(double), sizeof(double),
+                   MPI_INFO_NULL, MPI_COMM_WORLD, &winB);
+
+	//Temp Buffers
+	double *buf_A = new double[size];
+	double *buf_B = new double[size];
+
+	//Multiply Accum
+	auto mul_acc = [&](const double *AA, const double *BB){
+		for(int i = 0; i < n; i++){
+			for (int k = 0; k < n; k++){
+				const double aik = AA[i * n + k];
+				for (int j = 0; j < n; j++){
+					C[i * n + j] += aik * BB[k * n + j];
+				}
+			}
+		}
+	};
+
+	//For each K, pull A[i,k] and B[k,j]
+	for (int k = 0; k < q; k++){
+		int rankA = get_proc(rank_row, k, q);
+		int rankB = get_proc(k, rank_col, q);
+
+		//fetch A[ik] block
+		MPI_Win_lock(MPI_LOCK_SHARED, rank_A, 0, winA);
+		MPI_Get(buf_A, size, MPI_DOUBLE,
+                rank_A, 0, size, MPI_DOUBLE, winA);
+		MPI_Win_unlock(rank_A, winA);
+
+		//fetch B[kj]
+		MPI_Win_lock(MPI_LOCK_SHARED, rank_B, 0, winB);
+		MPI_Get(buf_B, size, MPI_DOUBLE,
+                rank_B, 0, size, MPI_DOUBLE, winB);
+		MPI_Win_unlock(rank_B, winB);
+
+		mul_acc(buf_A, buf_B);
+	}
+
+	delete[] buf_A;
+    delete[] buf_B;
+
+    MPI_Win_free(&winA);
+    MPI_Win_free(&winB);
 }
+
 
 int main (int argc, char** argv){
 
