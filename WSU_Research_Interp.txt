@@ -1,0 +1,39 @@
+This .txt file is to summarize the WSU paper to have a benchmark for testing the correctness of the 
+tutorial.
+
+The paper was written around 2016 so the data is somewhat outdated relative to the advancement made in 
+parallel computing but is the best benchmark I could find. 
+Do note that the Implemetations are also different for the Matrix Matrix Multiplications, but the same
+principals are being used to do the opersations. 
+
+Accorind to the paper, 2-sided communication (MPI) is faster when the task count is not 'enormous' 
+becuse the interface can pack noncontigous data into single messages which can send synchronously
+therefore leading to better efficiency. (See Page 3, A.Nonblocking Consensus; near bottom of page)
+
+The reasearchers found that 1-Sided Communication (RMA) become better once the number of tasks becomes
+>4,000. The MRA is implemented with Casper which is an asyncronous implementation. 
+
+The paper goes into more detail but the overall resualt can be summarized below:
+-MPI is better when:
+    1. There are Low Task Counts (<4,000)
+    2. There is no asyncronous processes
+    3. Messages are large and can be packed efficiently
+
+-RMA is better when:
+    1. There is a High Task count (>4,000)
+    2. When irregular updates occur
+    3. When we allow asyncronous progress
+    4. Large Scale Matric opeations (> 16K x 16K matrix size)
+
+Based on this paper I am going write the test harness to test with 2 Fixed NxN matrcies across 
+various p's
+
+N = 2048, p = 1, 4
+N = 4096, p = 8, 16
+
+The Expectationis for Each set is below
+  N    p    winner
+ 2048  1    Tie
+ 2048  4    MPI
+ 4098  8    MPI
+ 4098 16    RMA
