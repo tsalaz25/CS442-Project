@@ -54,7 +54,7 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 	//Data Distribution
 	if (rank == 0){
 		//Send Slices to each Rank
-		for (int p = 0; 0 < size; p++){
+		for (int p = 0; p < size; p++){
 			int r0 = p * BK;
 			double *src = A + r0 * n;
 
