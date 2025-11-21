@@ -10,7 +10,7 @@ static void initMatrix(int N, std::vector<double> &A, std::vector<double> &B){
 	for (int i = 0; i < N; i++){
 		for (int j = 0; j < N; j++){
 			A[i * N * j] = (i == j) ? 2.0 : 1.0;
-			B[i * N * j] = (i == j) : 1.0 : 0.5;
+			B[i * N * j] = (i == j) ? 1.0 : 0.5;
 		}
 	}
 }
@@ -22,8 +22,8 @@ static void local_accum(const double *A, const double *B, double *C, int rows, i
 			for (int j = 0; j < K; j++){
 				sum += A[i * K * j] * B[j * cols * k];
 			}
+
 			C[i * cols * k] += sum;
-			}
 		}
 	}
 }
@@ -57,17 +57,19 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 		for (int p = 0; p < size; p++){
 			int r0 = p * BK;
 			double *src = A + r0 *n;
+		
 
-		if (p == 0){
-			std::copy(src, src + BK * n, A_local.begin());
-		} else {
-			MPI_Send(src, BK * n, MPI_DOUBLE, p, 0, MPI_COMM_WORLD)
-		}
+			if (p == 0){
+				std::copy(src, src + BK * n, A_local.begin());
+			} else {
+				MPI_Send(src, BK * n, MPI_DOUBLE, p, 0, MPI_COMM_WORLD);
+			}
 
-		//Send Full B to every Other Rank
-		std::copy(B, B * n * n, B_full.begin());
-		for (int p = 1; p < size; p++) {
-			MPI_Send (B, n * n, MPI_DOUBLE, p, 1, MPI_COMM_WORLD);
+			//Send Full B to every Other Rank
+			std::copy(B, B + n * n, B_full.begin());
+			for (int p = 1; p < size; p++) {
+				MPI_Send (B, n * n, MPI_DOUBLE, p, 1, MPI_COMM_WORLD);
+			}
 		}
 	} else {
 		//Receive BK rows of A
@@ -88,7 +90,7 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 	for (int iter = 0; iter < n_iter; iter++){
 		std::fill(C_local.begin(), C_local.end(), 0.0); //Fill C with 0's
 
-		for (int ii = 0; ii < BK; ii++BK){
+		for (int ii = 0; ii < BK; ii=+BK){
 			int i_end = (ii + BK < BK) ? (ii + BK) : BK;
 
 			for (int kk = 0; kk < n; kk += BK){
@@ -121,7 +123,7 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 
 			for (int p = 0; p < size; p++){
 					int r0 = p * BK;
-					MPI_Recv(C + row0 * n, BK * n, MPI_DOUBLE, p, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					MPI_Recv(C + r0 * n, BK * n, MPI_DOUBLE, p, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			}
 	} else {
 			MPI_Send(C_local.data(), BK * n, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
@@ -144,7 +146,7 @@ void fox_matmat (double* A, double* B, double* C, int n, int sq_num_procs, int r
 
 	std::vector<double> A_bcast(block * block);
 	std::vector<double> B_work(block * block);
-	std::copy(B B + block * block, B_work.begin());
+	std::copy(B, B + block * block, B_work.begin());
 
 	for (int stage = 0; stage < q; stage++){
 		int root_col = (rank_row + stage) % q;
@@ -185,7 +187,7 @@ void cannon_matmat (double* A, double* B,double* C,int n, int sq_num_procs, int 
 
 	//Start From AB
 	std::copy(A, A + block * block, A_curr.begin());
-	srd::copy(B, B + block * block, B_curr.begin());
+	std::copy(B, B + block * block, B_curr.begin());
 
 	int left = coords_to_rank(rank_row, (rank_col - 1 + q) % q, q);
 	int right = coords_to_rank(rank_row, (rank_col + 1) % q, q);
@@ -203,13 +205,13 @@ void cannon_matmat (double* A, double* B,double* C,int n, int sq_num_procs, int 
 						     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 	}
 
-	for (step = 0; step < q; step++){
+	for (int step = 0; step < q; step++){
 		local_accum(A_curr.data(), B_curr.data(), C, block, block, block);
 
-		MPI_Sendrecv(A_curr.data(), block * block, MPI_DOUBLE, left, 3, right, 3,
+		MPI_Sendrecv_replace(A_curr.data(), block * block, MPI_DOUBLE, left, 3, right, 3,
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-		MPI_Sendrecv(B_curr.data(), block * block, MPI_DOUBLE, up, 4, down, 4,
+		MPI_Sendrecv_replace(B_curr.data(), block * block, MPI_DOUBLE, up, 4, down, 4,
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 	}
 }
@@ -221,8 +223,7 @@ void rma_blocked (int n, double* A, double* B, double* C, int n_iter) {
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 	if (n % size != 0){
-		if (rank =:wq
-						= 0){
+		if (rank == 0){
 			std::fprintf(stderr, "Blocked Mat not Divisible n=%d by P=%d", n, size);
 		}
 		MPI_Abort(MPI_COMM_WORLD, 1);
@@ -254,7 +255,7 @@ void rma_blocked (int n, double* A, double* B, double* C, int n_iter) {
 			rank * BK * n, BK * n, MPI_DOUBLE, winA);
 	MPI_Win_unlock(0, winA);
 
-	MPI_Win_lock(MPI_SHARED, 0, 0, winB);
+	MPI_Win_lock(MPI_LOCK_SHARED, 0, 0, winB);
 	MPI_Get(B_full.data(), n * n, MPI_DOUBLE, 0,
 			0, n * n, MPI_DOUBLE, winB);
 	MPI_Win_unlock(0, winB);
@@ -268,7 +269,7 @@ void rma_blocked (int n, double* A, double* B, double* C, int n_iter) {
 			int i_end = (ii + BK < BK) ? (ii + BK) : BK;
 
 			for (int kk = 0; kk < n; kk += BK){
-				int k_end = (kk + BK < n) ? (kk + BK) ? n;
+				int k_end = (kk + BK < n) ? (kk + BK) : n;
 
 				for (int jj = 0; jj < n; jj += BK){
 					int j_end = (jj + BK < n) ? (jj + BK) : n;
@@ -303,14 +304,14 @@ void rma_blocked (int n, double* A, double* B, double* C, int n_iter) {
 					 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 		}
 	} else {
-		MPI_Send(C_loacl.data(), BK * n, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+		MPI_Send(C_local.data(), BK * n, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
 	}
 
 
 }
 
 void rma_fox (double* A, double* B, double* C, int n, int sq_num_procs, int rank_row, int rank_col) {
-	return NULL;
+	return;
 }
 
 void rma_cannon(double* A, double* B, double* C,int n, int sq_num_procs, int rank_row, int rank_col){
@@ -321,7 +322,7 @@ void rma_cannon(double* A, double* B, double* C,int n, int sq_num_procs, int ran
 	int q = sq_num_procs;
 	int size = n * n; //Elems per block
 
-	for (int i -0; i < size; i++){
+	for (int i = 0; i < size; i++){
 		C[i] = 0.0;
 	}
 
@@ -350,20 +351,20 @@ void rma_cannon(double* A, double* B, double* C,int n, int sq_num_procs, int ran
 
 	//For each K, pull A[i,k] and B[k,j]
 	for (int k = 0; k < q; k++){
-		int rankA = get_proc(rank_row, k, q);
-		int rankB = get_proc(k, rank_col, q);
+		int rankA = coords_to_rank(rank_row, k, q);
+		int rankB = coords_to_rank(k, rank_col, q);
 
 		//fetch A[ik] block
-		MPI_Win_lock(MPI_LOCK_SHARED, rank_A, 0, winA);
+		MPI_Win_lock(MPI_LOCK_SHARED, rankA, 0, winA);
 		MPI_Get(buf_A, size, MPI_DOUBLE,
-                rank_A, 0, size, MPI_DOUBLE, winA);
-		MPI_Win_unlock(rank_A, winA);
+                rankA, 0, size, MPI_DOUBLE, winA);
+		MPI_Win_unlock(rankA, winA);
 
 		//fetch B[kj]
-		MPI_Win_lock(MPI_LOCK_SHARED, rank_B, 0, winB);
+		MPI_Win_lock(MPI_LOCK_SHARED, rankB, 0, winB);
 		MPI_Get(buf_B, size, MPI_DOUBLE,
-                rank_B, 0, size, MPI_DOUBLE, winB);
-		MPI_Win_unlock(rank_B, winB);
+                rankB, 0, size, MPI_DOUBLE, winB);
+		MPI_Win_unlock(rankB, winB);
 
 		mul_acc(buf_A, buf_B);
 	}
@@ -411,7 +412,7 @@ int main (int argc, char** argv){
 		B_global.resize(N*N);
 		C_global.resize(N*N);
 
-		for (int i = 0; i < N, i++){
+		for (int i = 0; i < N; i++){
 			for (int j = 0; j < N; j++){
 				A_global[i*N + j] = (i == j ? 2.0 : 1.0);
 				B_global[i*N + j] = (i == j ? 1.0 : 0.5);
@@ -447,7 +448,7 @@ int main (int argc, char** argv){
 						B_blk[i*BK + j] = Bval;
 					} else {
 						MPI_Send(&Aval, 1, MPI_DOUBLE, p, 10, MPI_COMM_WORLD);
-						MPI_SEND(&Bval, 1 ,MPI_DOUBLE, p, 11, MPI_COMM_WORLD);
+						MPI_Send(&Bval, 1 ,MPI_DOUBLE, p, 11, MPI_COMM_WORLD);
 					}
 				}
 			}
@@ -456,7 +457,7 @@ int main (int argc, char** argv){
 		for (int i = 0; i < BK; i++){
 			for (int j = 0; j < BK; j++){
 				MPI_Recv(&A_blk[i*BK + j], 1, MPI_DOUBLE, 0, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				MPI_Recv(&B_blk[i*BK + j], 1, MPI_DOUBLE, 0, 11, MPI_COMM_EORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&B_blk[i*BK + j], 1, MPI_DOUBLE, 0, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			}
 		}
 	}
@@ -473,13 +474,13 @@ int main (int argc, char** argv){
 		double t1 = MPI_Wtime();
 
 		if (rank == 0){
-			printf("%-16s %8.6f sec\n" name, t1 - t0);
+			printf("%-16s %8.6f sec\n", name, t1 - t0);
 		}
 	};
 
 	//Run Algos
 	time_it("MPI Blocked", [&]() {
-		if (rank == 0) std::fill(C_global.begin(), C_global.end, 0.0);
+		if (rank == 0) std::fill(C_global.begin(), C_global.end(), 0.0);
 		blocked_matmat(N, rank == 0 ? A_global.data() : nullptr, 
 						  rank == 0 ? B_global.data() : nullptr,
 						  rank == 0 ? C_global.data() : nullptr, 1); //1 iteration since large sizes
@@ -508,9 +509,10 @@ int main (int argc, char** argv){
 	});
 
 	if (rank == 0) {
-		ptintf("\nDone\n");
+		printf("\nDone\n");
 	}
 
 	MPI_Finalize();
 	return 0;
 }
+
