@@ -377,5 +377,140 @@ void rma_cannon(double* A, double* B, double* C,int n, int sq_num_procs, int ran
 
 
 int main (int argc, char** argv){
+	MPI_Init(&argc, &argv);
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+	if (argc < 2) {
+		if (rank == 0) { fprintf(stderr, "usage ./matmul N\n"); }
+		MPI_Finalize();
+		return 1;
+	}
+
+	int N = atoi(argv[1]);
+	if (N % size != 0){
+		if (rank == 0) { fprintf(stderr, "N mut be Divisible by P\n"); }
+		MPI_Finalize();
+        return 1;
+	}
+
+	int q = (int)std::sqrt(size);
+	if (q * q != size){
+		if (rank == 0) { fprintf(stderr, "Fox/Cannon require perfect Squares");}
+		MPI_Finalize();
+        return 1;
+	}
+
+	int BK = N/q;
+
+	//Allocate Matricies
+	std::vector<double> A_global, B_global, C_global;
+	if (rank == 0){
+		A_global.resize(N*N);
+		B_global.resize(N*N);
+		C_global.resize(N*N);
+
+		for (int i = 0; i < N, i++){
+			for (int j = 0; j < N; j++){
+				A_global[i*N + j] = (i == j ? 2.0 : 1.0);
+				B_global[i*N + j] = (i == j ? 1.0 : 0.5);
+			}
+		}
+	}
+
+	//Blocking for Cannons/Fox
+	std::vector<double> A_blk(BK * BK);
+	std::vector<double> B_blk(BK * BK);
+	std::vector<double> C_blk(BK * BK, 0.0);
+
+	//compute coords in qxq grid
+	int rank_row = rank/q;
+	int rank_col = rank & q;
+
+	//Scatter Blocks
+	if (rank == 0 ){
+		for (int p = 0; p < size; p++){
+			int rr = p / q;
+			int cc = p % q;
+
+			for (int i = 0 ; i < BK; i++){
+				for (int j = 0; j < BK; j++){
+					int gi = rr * BK + i;
+					int gj = cc * BK + j;
+
+					double Aval = A_global[gi*N + gj];
+					double Bval = B_global[gi*N + gj];
+
+					if (p == 0){
+						A_blk[i*BK + j] = Aval;
+						B_blk[i*BK + j] = Bval;
+					} else {
+						MPI_Send(&Aval, 1, MPI_DOUBLE, p, 10, MPI_COMM_WORLD);
+						MPI_SEND(&Bval, 1 ,MPI_DOUBLE, p, 11, MPI_COMM_WORLD);
+					}
+				}
+			}
+		}
+	} else {
+		for (int i = 0; i < BK; i++){
+			for (int j = 0; j < BK; j++){
+				MPI_Recv(&A_blk[i*BK + j], 1, MPI_DOUBLE, 0, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&B_blk[i*BK + j], 1, MPI_DOUBLE, 0, 11, MPI_COMM_EORLD, MPI_STATUS_IGNORE);
+			}
+		}
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
+
+
+
+	//Timing Algo
+	auto time_it = [&](const char* name, auto fn){
+		MPI_Barrier(MPI_COMM_WORLD);
+		double t0 = MPI_Wtime();
+		fn();
+		MPI_Barrier(MPI_COMM_WORLD);
+		double t1 = MPI_Wtime();
+
+		if (rank == 0){
+			printf("%-16s %8.6f sec\n" name, t1 - t0);
+		}
+	};
+
+	//Run Algos
+	time_it("MPI Blocked", [&]() {
+		if (rank == 0) std::fill(C_global.begin(), C_global.end, 0.0);
+		blocked_matmat(N, rank == 0 ? A_global.data() : nullptr, 
+						  rank == 0 ? B_global.data() : nullptr,
+						  rank == 0 ? C_global.data() : nullptr, 1); //1 iteration since large sizes
+	});
+
+	time_it("MPI Fox", [&](){
+		std::fill(C_blk.begin(), C_blk.end(), 0.0);
+		fox_matmat(A_blk.data(), B_blk.data(), C_blk.data(), BK, q, rank_row, rank_col);
+	});
+
+	time_it("MPI Cannon", [&](){
+		std::fill(C_blk.begin(), C_blk.end(), 0.0);
+		cannon_matmat(A_blk.data(), B_blk.data(), C_blk.data(), BK, q, rank_row, rank_col);
+	});
+
+	time_it("RMA Blocked", [&](){
+		if (rank == 0) std::fill(C_global.begin(), C_global.end(), 0.0);
+		rma_blocked(N, rank == 0 ? A_global.data() : nullptr,
+					   rank == 0 ? B_global.data() : nullptr,
+					   rank == 0 ? C_global.data() : nullptr, 1);
+	});
+
+	time_it("RMA Cannon", [&](){
+		std::fill(C_blk.begin(), C_blk.end(), 0.0);
+		rma_cannon(A_blk.data(), B_blk.data(), C_blk.data(), BK, q, rank_row, rank_col);		
+	});
+
+	if (rank == 0) {
+		ptintf("\nDone\n");
+	}
+
+	MPI_Finalize();
+	return 0;
 }
