@@ -9,8 +9,8 @@
 static void initMatrix(int N, std::vector<double> &A, std::vector<double> &B){
 	for (int i = 0; i < N; i++){
 		for (int j = 0; j < N; j++){
-			A[i * N * j] = (i == j) ? 2.0 : 1.0;
-			B[i * N * j] = (i == j) ? 1.0 : 0.5;
+			A[i * N + j] = (i == j) ? 2.0 : 1.0;
+			B[i * N + j] = (i == j) ? 1.0 : 0.5;
 		}
 	}
 }
@@ -20,10 +20,10 @@ static void local_accum(const double *A, const double *B, double *C, int rows, i
 		for (int k = 0; k < cols; k++){
 			double sum = 0.0;
 			for (int j = 0; j < K; j++){
-				sum += A[i * K * j] * B[j * cols * k];
+				sum += A[i * K + j] * B[j * cols + k];
 			}
 
-			C[i * cols * k] += sum;
+			C[i * cols + k] += sum;
 		}
 	}
 }
@@ -54,23 +54,22 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 	//Data Distribution
 	if (rank == 0){
 		//Send Slices to each Rank
-		for (int p = 0; p < size; p++){
+		for (int p = 0; 0 < size; p++){
 			int r0 = p * BK;
-			double *src = A + r0 *n;
-		
+			double *src = A + r0 * n;
 
 			if (p == 0){
 				std::copy(src, src + BK * n, A_local.begin());
 			} else {
 				MPI_Send(src, BK * n, MPI_DOUBLE, p, 0, MPI_COMM_WORLD);
 			}
-
-			//Send Full B to every Other Rank
-			std::copy(B, B + n * n, B_full.begin());
-			for (int p = 1; p < size; p++) {
-				MPI_Send (B, n * n, MPI_DOUBLE, p, 1, MPI_COMM_WORLD);
-			}
+		}	
+		//Send full B to other ranks
+		std::copy(B, B + n * n, B_full.begin());
+		for (int p = 1; p < size; p++){
+			MPI_Send(B, n * n, MPI_DOUBLE, p , 1, MPI_COMM_WORLD);
 		}
+
 	} else {
 		//Receive BK rows of A
 		MPI_Recv(A_local.data(), BK * n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -90,7 +89,7 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 	for (int iter = 0; iter < n_iter; iter++){
 		std::fill(C_local.begin(), C_local.end(), 0.0); //Fill C with 0's
 
-		for (int ii = 0; ii < BK; ii=+BK){
+		for (int ii = 0; ii < BK; ii += BK){
 			int i_end = (ii + BK < BK) ? (ii + BK) : BK;
 
 			for (int kk = 0; kk < n; kk += BK){
@@ -121,7 +120,7 @@ void blocked_matmat (int n, double* A, double* B, double* C, int n_iter){
 	if (rank == 0){
 			std::copy(C_local.begin(), C_local.end(), C);
 
-			for (int p = 0; p < size; p++){
+			for (int p = 1; p < size; p++){
 					int r0 = p * BK;
 					MPI_Recv(C + r0 * n, BK * n, MPI_DOUBLE, p, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			}
@@ -427,7 +426,7 @@ int main (int argc, char** argv){
 
 	//compute coords in qxq grid
 	int rank_row = rank/q;
-	int rank_col = rank & q;
+	int rank_col = rank % q;
 
 	//Scatter Blocks
 	if (rank == 0 ){
