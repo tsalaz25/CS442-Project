@@ -382,6 +382,8 @@ int main (int argc, char** argv){
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+	printf("DEBUG: Running Main");
+
 	if (argc < 2) {
 		if (rank == 0) { fprintf(stderr, "usage ./matmul N\n"); }
 		MPI_Finalize();
@@ -407,6 +409,7 @@ int main (int argc, char** argv){
 	//Allocate Matricies
 	std::vector<double> A_global, B_global, C_global;
 	if (rank == 0){
+		printf("DEBUG: Allocating Matrix's");
 		A_global.resize(N*N);
 		B_global.resize(N*N);
 		C_global.resize(N*N);
@@ -430,6 +433,8 @@ int main (int argc, char** argv){
 
 	//Scatter Blocks
 	if (rank == 0 ){
+
+		printf("DEBUG: Scattering Matrix");
 		for (int p = 0; p < size; p++){
 			int rr = p / q;
 			int cc = p % q;
@@ -466,6 +471,8 @@ int main (int argc, char** argv){
 
 	//Timing Algo
 	auto time_it = [&](const char* name, auto fn){
+		printf("DEBUG: Running %s",  name);
+			
 		MPI_Barrier(MPI_COMM_WORLD);
 		double t0 = MPI_Wtime();
 		fn();
