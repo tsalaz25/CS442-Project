@@ -36,7 +36,8 @@ The Expectations for Each set is below
  2048  1        Tie               RMA
  2048  4        Tie               RMA
  2048  16       MPI*              RMA       
- 4098  8        Tie               RMA
- 4098  16       Tie               RMA 
+ 4098  8        MPI               RMA
+ 4098  16       MPI               RMA 
 
-*MPI should win here because the communication here is ideal for the method, but it shuoldnt win by much
+*MPI should win here because the communication here is ideal for the method, but it shuoldnt win by much.
+After this point MPI the messages are very efficiently packed.
